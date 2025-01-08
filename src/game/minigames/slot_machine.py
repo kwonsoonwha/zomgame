@@ -7,154 +7,179 @@ class SlotMachine:
         self.screen = screen
         self.symbols = ['7', 'A', 'K', 'Q', 'J']
         self.reels = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
-        self.spinning = False
         self.bet_amount = 100
         self.min_bet = 100
-        self.auto_spin = False
-        self.spin_time = 0
         self.win_amount = 0
-        self.result_timer = 0
         
-        # 폰트 설정
-        self.font = pygame.font.SysFont('malgungothic', 72)
-        self.small_font = pygame.font.SysFont('malgungothic', 36)
-        self.title_font = pygame.font.SysFont('malgungothic', 48)
+        # 게임 상태 관리
+        self.game_state = "READY"  # READY, SPINNING, PAYING
+        self.spin_start_time = 0
+        self.spin_duration = 2500  # 총 회전 시간 (ms)
         
-        # 위치 계산 (화면 중앙)
-        self.x = 960 - 200  # 중앙 정렬
-        self.y = 200
+        # UI 관련
+        screen_width = screen.get_width()
+        self.x = (screen_width // 2) - 400
+        self.y = 50
+        self.error_message = None
+        self.error_timer = 0
         
-    def change_bet(self, increase):
-        if increase:
-            self.bet_amount += 100
-        else:
-            self.bet_amount = max(self.min_bet, self.bet_amount - 100)
-    
-    def spin(self):
-        if not self.spinning:
-            self.spinning = True
-            self.spin_time = 30  # 스핀 시간
-            return -self.bet_amount  # 베팅 금액 차감
-        return 0
-    
-    def check_win(self):
-        win_amount = 0
-        seven_lines = 0  # 777 라인 카운트
+    def handle_click(self, pos, current_gold):
+        x, y = pos
         
-        # 가로줄 체크
-        for row in range(3):
-            if all(self.symbols[self.reels[row][col]] == '7' for col in range(3)):
-                seven_lines += 1
-            elif all(self.symbols[self.reels[row][col]] == self.symbols[self.reels[row][0]] for col in range(3)):
-                win_amount += self.bet_amount * 3
-
-        # 대각선 체크
-        if all(self.symbols[self.reels[i][i]] == '7' for i in range(3)):
-            seven_lines += 1
-        elif all(self.symbols[self.reels[i][i]] == self.symbols[self.reels[0][0]] for i in range(3)):
-            win_amount += self.bet_amount * 5
-
-        if all(self.symbols[self.reels[i][2-i]] == '7' for i in range(3)):
-            seven_lines += 1
-        elif all(self.symbols[self.reels[i][2-i]] == self.symbols[self.reels[0][2]] for i in range(3)):
-            win_amount += self.bet_amount * 5
-
-        # 777 라인에 따른 보상
-        if seven_lines == 1:
-            win_amount += self.bet_amount * 10
-        elif seven_lines == 2:
-            win_amount += self.bet_amount * 200
-        elif seven_lines == 3:
-            win_amount += self.bet_amount * 5000
-
-        return win_amount
-    
-    def update(self):
-        if self.spinning:
-            self.spin_time -= 1
-            # 릴 업데이트
-            for row in range(3):
-                for col in range(3):
-                    if self.spin_time > 0:
-                        self.reels[row][col] = random.randint(0, len(self.symbols)-1)
+        # 게임이 진행 중이면 클릭 무시
+        if self.game_state != "READY":
+            return False
             
-            if self.spin_time <= 0:
-                self.spinning = False
-                win = self.check_win()
-                self.win_amount = win
-                self.result_timer = 120
+        # 베팅 버튼 (-/+)
+        if self.y + 240 <= y <= self.y + 280:
+            if self.x + 20 <= x <= self.x + 60:  # - 버튼
+                self.bet_amount = max(self.min_bet, self.bet_amount - 50)
+            elif self.x + 330 <= x <= self.x + 370:  # + 버튼
+                self.bet_amount += 50
+            return False
+        
+        # 슬롯 영역 클릭 - 게임 시작
+        if (self.x + 50 <= x <= self.x + 350 and 
+            self.y + 70 <= y <= self.y + 240):
+            if current_gold >= self.bet_amount:
+                return True
+            else:
+                self.show_error("골드가 부족합니다")
                 
-                # 자동 스핀이 켜져 있으면 다시 스핀
-                if self.auto_spin and not self.spinning:
-                    self.spin()
-                
-                return win
-        return 0
-    
-    def draw(self):
-        # 메� 패널
-        panel_width = 400
-        panel_height = 600
-        pygame.draw.rect(self.screen, (160, 160, 160), 
-                        (self.x, self.y, panel_width, panel_height))
-        pygame.draw.rect(self.screen, (200, 200, 200), 
-                        (self.x+5, self.y+5, panel_width-10, panel_height-10))
+        return False
         
-        # 제목
-        title = self.title_font.render("SLOT MACHINE", True, (0, 0, 0))
-        title_rect = title.get_rect(center=(self.x + panel_width//2, self.y + 40))
-        self.screen.blit(title, title_rect)
+    def start_spin(self):
+        if self.game_state != "READY":
+            return
+            
+        self.game_state = "SPINNING"
+        self.spin_start_time = pygame.time.get_ticks()
+        self.win_amount = 0
         
-        # 릴 그리기
-        for row in range(3):
-            for col in range(3):
-                # 심볼 배경
-                pygame.draw.rect(self.screen, (255, 255, 255),
-                               (self.x + 50 + col*100, self.y + 100 + row*100, 80, 80))
-                # 심볼
-                symbol = self.symbols[self.reels[row][col]]
-                color = (200, 0, 0) if symbol == '7' else (0, 0, 0)
-                text = self.font.render(symbol, True, color)
-                text_rect = text.get_rect(center=(self.x + 90 + col*100, 
-                                                self.y + 140 + row*100))
-                self.screen.blit(text, text_rect)
-        
-        # 당첨 구조
-        win_infos = [
-            ("WIN TABLE", (255, 215, 0)),
-            ("777 THREE LINES: x5000", (255, 255, 255)),
-            ("777 TWO LINES: x200", (255, 255, 255)),
-            ("777 ONE LINE: x10", (255, 255, 255)),
-            ("SAME LINE: x3", (200, 200, 200)),
-            ("SAME DIAG: x5", (200, 200, 200))
+        # 최종 결과 결정
+        self.final_symbols = [
+            [random.randint(0, len(self.symbols)-1) for _ in range(3)],
+            [random.randint(0, len(self.symbols)-1) for _ in range(3)],
+            [random.randint(0, len(self.symbols)-1) for _ in range(3)]
         ]
         
-        for i, (info, color) in enumerate(win_infos):
-            text = self.small_font.render(info, True, color)
-            text_rect = text.get_rect(left=self.x + 30, 
-                                    top=self.y + 400 + i*30)
-            self.screen.blit(text, text_rect)
+    def update(self):
+        if self.game_state == "READY":
+            return
+            
+        current_time = pygame.time.get_ticks()
+        elapsed = current_time - self.spin_start_time
         
-        # 베팅 컨트롤
-        pygame.draw.rect(self.screen, (40, 40, 40), 
-                        (self.x + 50, self.y + 520, 300, 40))
-        bet_text = self.title_font.render(f"BET: {self.bet_amount}", True, (0, 255, 0))
-        bet_rect = bet_text.get_rect(center=(self.x + 200, self.y + 540))
+        if self.game_state == "SPINNING":
+            # 각 릴 업데이트
+            for i in range(3):
+                stop_time = (self.spin_duration / 3) * (i + 1)
+                if elapsed < stop_time:
+                    speed = max(1, (stop_time - elapsed) / 100)
+                    for j in range(3):
+                        self.reels[i][j] = random.randint(0, len(self.symbols)-1)
+                else:
+                    for j in range(3):
+                        self.reels[i][j] = self.final_symbols[i][j]
+            
+            # 모든 릴이 정지했는지 확인
+            if elapsed >= self.spin_duration:
+                self.check_win()
+                self.game_state = "PAYING"
+                
+        elif self.game_state == "PAYING":
+            if elapsed >= self.spin_duration + 1000:  # 결과 표시 1초 후
+                self.game_state = "READY"
+    
+    def check_win(self):
+        self.win_amount = 0
+        seven_lines = 0
+        self.winning_lines = []
+        
+        # 가로줄 체크
+        for i in range(3):
+            if self.reels[0][i] == self.reels[1][i] == self.reels[2][i]:
+                if self.reels[0][i] == 0:  # 777
+                    seven_lines += 1
+                    self.winning_lines.append(i)
+                else:
+                    self.winning_lines.append(i)
+                    multiplier = 5 - self.reels[0][i]  # A=4배, K=3배, Q=2배, J=1배
+                    self.win_amount += self.bet_amount * multiplier
+        
+        # 777 라인 수에 따른 보상
+        if seven_lines == 1:
+            self.win_amount += self.bet_amount * 10
+        elif seven_lines == 2:
+            self.win_amount += self.bet_amount * 500
+        elif seven_lines == 3:
+            self.win_amount += self.bet_amount * 10000
+    
+    def draw(self):
+        # 메인 패널
+        pygame.draw.rect(self.screen, (200, 200, 200), 
+                        (self.x, self.y, 400, 300))
+        
+        # 제목
+        title_font = pygame.font.SysFont('malgungothic', 36)
+        title = title_font.render("SLOT MACHINE", True, (0, 0, 0))
+        title_rect = title.get_rect(center=(self.x + 200, self.y + 30))
+        self.screen.blit(title, title_rect)
+        
+        # 릴 배경
+        for i in range(3):
+            pygame.draw.rect(self.screen, (150, 150, 150),
+                           (self.x + 50 + i*100, self.y + 70, 80, 180))
+            pygame.draw.rect(self.screen, (100, 100, 100),
+                           (self.x + 50 + i*100, self.y + 70, 80, 180), 2)
+        
+        # 심볼 그리기
+        symbol_font = pygame.font.SysFont('arial', 48)
+        for i in range(3):
+            for j in range(3):
+                color = (255, 0, 0) if self.symbols[self.reels[i][j]] == '7' else (0, 0, 0)
+                symbol = symbol_font.render(self.symbols[self.reels[i][j]], True, color)
+                symbol_rect = symbol.get_rect(
+                    center=(self.x + 90 + i*100, self.y + 95 + j*60))
+                self.screen.blit(symbol, symbol_rect)
+        
+        # 당첨 라인 표시
+        if self.game_state == "PAYING" and pygame.time.get_ticks() % 1000 < 500:
+            for line in self.winning_lines:
+                pygame.draw.rect(self.screen, (255, 215, 0),
+                               (self.x + 50, self.y + 70 + line*60, 300, 50), 3)
+        
+        # 베팅 금액
+        bet_text = title_font.render(f"BET: {self.bet_amount}", True, (0, 255, 0))
+        bet_rect = bet_text.get_rect(center=(self.x + 200, self.y + 260))
         self.screen.blit(bet_text, bet_rect)
         
         # 베팅 버튼
-        for i, (text, x) in enumerate([("-", self.x + 20), ("+", self.x + 330)]):
-            pygame.draw.rect(self.screen, (200, 200, 200), (x, self.y + 520, 40, 40))
-            btn_text = self.font.render(text, True, (0, 0, 0))
-            btn_rect = btn_text.get_rect(center=(x + 20, self.y + 540))
+        for text, x in [("-", self.x + 20), ("+", self.x + 330)]:
+            pygame.draw.rect(self.screen, (200, 200, 200), (x, self.y + 240, 40, 40))
+            btn_text = symbol_font.render(text, True, (0, 0, 0))
+            btn_rect = btn_text.get_rect(center=(x + 20, self.y + 260))
             self.screen.blit(btn_text, btn_rect)
         
-        # 자동 스핀 버튼
-        auto_color = (50, 200, 50) if self.auto_spin else (200, 50, 50)
+        # AUTO SPIN 상태
+        auto_color = (200, 50, 50)  # 빨간색 (OFF)
         pygame.draw.rect(self.screen, auto_color, 
-                        (self.x, self.y + panel_height, panel_width, 40))
-        auto_text = self.small_font.render(f"AUTO SPIN: {'ON' if self.auto_spin else 'OFF'}", 
-                                         True, (255, 255, 255))
-        auto_rect = auto_text.get_rect(center=(self.x + panel_width//2, 
-                                             self.y + panel_height + 20))
-        self.screen.blit(auto_text, auto_rect) 
+                        (self.x, self.y + 300, 400, 40))
+        auto_text = title_font.render("AUTO SPIN: OFF", True, (255, 255, 255))
+        auto_rect = auto_text.get_rect(center=(self.x + 200, self.y + 320))
+        self.screen.blit(auto_text, auto_rect)
+        
+        # 에러 메시지
+        if self.error_message:
+            current_time = pygame.time.get_ticks()
+            if current_time - self.error_timer < 2000:
+                error_font = pygame.font.SysFont('malgungothic', 24)
+                error_text = error_font.render(self.error_message, True, (255, 0, 0))
+                error_rect = error_text.get_rect(center=(self.x + 200, self.y + 150))
+                self.screen.blit(error_text, error_rect)
+            else:
+                self.error_message = None
+        
+    def show_error(self, message):
+        self.error_message = message
+        self.error_timer = pygame.time.get_ticks() 
