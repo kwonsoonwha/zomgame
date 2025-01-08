@@ -78,34 +78,48 @@ class Game:
         self.slot_machine = SlotMachine(self.screen)
         self.rps_game = RPSGame(self.screen)
         
-        # 골드 자동 증가를 위한 타이머 추가
+        # 유닛 리스트 추가
+        self.units = []
+        
+        # 골드 자동 증가를 위한 타이머
         self.last_gold_update = pygame.time.get_ticks()
-        self.gold_update_delay = 100  # 0.1초마다 업데이트 (1초에 10골드)
-
+        self.gold_update_delay = 100
+        
+        # AI 관련 �수 추가
+        self.ai_strategy = {
+            "aggressive": {
+                "전사": 0.6,  # 전사 생산 확률
+                "궁수": 0.3,  # 궁수 생산 확률
+                "기사": 0.1   # 기사 생산 확률
+            },
+            "defensive": {
+                "전사": 0.3,
+                "궁수": 0.5,
+                "기사": 0.2
+            }
+        }
+        self.ai_mode = "aggressive"  # 기본 전략
+        self.ai_action_delay = 1500  # 1.5초마다 결정
+        self.last_ai_action = pygame.time.get_ticks()
+        
     def run(self):
         clock = pygame.time.Clock()
         
         while True:
             current_time = pygame.time.get_ticks()
             
-            # 골드 자동 증가 처리
+            # 골드 자동 증가
             if current_time - self.last_gold_update >= self.gold_update_delay:
-                self.left_castle.gold += 1  # 왼쪽 플레이어 (사람)
-                self.right_castle.gold += 1  # 오른쪽 플레이어 (AI)
+                self.left_castle.gold += 1
+                self.right_castle.gold += 1
                 self.last_gold_update = current_time
             
-            # 슬롯머신 업데이트
-            if self.slot_machine.auto_spin and not self.slot_machine.spinning:
-                if self.left_castle.gold >= self.slot_machine.bet_amount:
-                    gold_change = self.slot_machine.spin()
-                    self.left_castle.gold += gold_change
+            # AI 행동 업데이트
+            if current_time - self.last_ai_action >= self.ai_action_delay:
+                self.ai_action()
+                self.last_ai_action = current_time
             
-            # 슬롯머신 진행 중인 경우 업데이트
-            if self.slot_machine.spinning:
-                win_amount = self.slot_machine.update()
-                if win_amount > 0:
-                    self.left_castle.gold += win_amount
-            
+            # 이벤트 처리
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
@@ -114,36 +128,98 @@ class Game:
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = pygame.mouse.get_pos()
                     
-                    # 슬롯머신 베팅 조절
-                    if 490 <= mouse_pos[0] <= 525 and 425 <= mouse_pos[1] <= 460:  # - 버튼
-                        self.slot_machine.change_bet(False)
-                    elif 700 <= mouse_pos[0] <= 735 and 425 <= mouse_pos[1] <= 460:  # + 버튼
-                        self.slot_machine.change_bet(True)
+                    # 유닛 생산 버튼 클릭 처리
+                    unit_type = self.left_castle.check_unit_click(mouse_pos)
+                    if unit_type:
+                        new_unit = self.left_castle.create_unit(unit_type)
+                        if new_unit:
+                            self.units.append(new_unit)
                     
-                    # 자동 스핀 토글 버튼
-                    elif 480 <= mouse_pos[0] <= 740 and 480 <= mouse_pos[1] <= 515:
-                        self.slot_machine.auto_spin = not self.slot_machine.auto_spin
-                        if self.slot_machine.auto_spin and not self.slot_machine.spinning:
-                            if self.left_castle.gold >= self.slot_machine.bet_amount:
-                                gold_change = self.slot_machine.spin()
-                                self.left_castle.gold += gold_change
-                    
-                    # 슬롯머신 수동 스핀
-                    elif (480 <= mouse_pos[0] <= 740 and 95 <= mouse_pos[1] <= 335 and 
-                          not self.slot_machine.spinning):
-                        if self.left_castle.gold >= self.slot_machine.bet_amount:
-                            gold_change = self.slot_machine.spin()
-                            self.left_castle.gold += gold_change
+                    # 기존의 미니게임 클릭 처리...
             
-            # 화면 업데이트
-            self.screen.fill((50, 168, 82))  # 초록색 배경
+            # 유닛 업데이트
+            self.update_units()
+            
+            # 화면 그리기
+            self.screen.fill((50, 168, 82))
             self.left_castle.draw()
             self.right_castle.draw()
+            
+            # 유닛 그리기
+            for unit in self.units:
+                unit.draw()
+            
             self.slot_machine.draw()
             self.rps_game.draw()
             pygame.display.flip()
             
-            clock.tick(60)  # FPS 제한
+            clock.tick(60)
+            
+    def update_units(self):
+        # 죽은 유닛 제거
+        self.units = [unit for unit in self.units if not unit.is_dead()]
+        
+        for unit in self.units:
+            unit.move()
+            
+            # 유닛 충돌 체크
+            for other in self.units:
+                if unit != other and self.check_collision(unit, other):
+                    if unit.position != other.position:  # 적대적 유닛끼리만 전투
+                        unit.take_damage(other.attack)
+                        other.take_damage(unit.attack)
+            
+            # 성 공격 체크
+            if unit.position == "left" and unit.x >= 1620:  # 오른쪽 성 공격
+                self.right_castle.take_damage(unit.attack)
+                unit.health = 0  # 공격 후 소멸
+            elif unit.position == "right" and unit.x <= 300:  # 왼쪽 성 공격
+                self.left_castle.take_damage(unit.attack)
+                unit.health = 0  # 공격 후 소멸
+                
+    def check_collision(self, unit1, unit2):
+        # 간단한 원형 충돌 체크
+        distance = ((unit1.x - unit2.x) ** 2 + (unit1.y - unit2.y) ** 2) ** 0.5
+        return distance < (unit1.size + unit2.size)
+        
+    def ai_action(self):
+        # AI가 현재 상황을 분석
+        player_units = [u for u in self.units if u.position == "left"]
+        ai_units = [u for u in self.units if u.position == "right"]
+        
+        # 전략 선택
+        if self.right_castle.health < 50:  # 체력이 낮으면 방어적
+            self.ai_mode = "defensive"
+        elif len(player_units) > len(ai_units) + 2:  # 상대 유닛이 많으면 방어적
+            self.ai_mode = "defensive"
+        else:
+            self.ai_mode = "aggressive"
+        
+        # 유닛 생산 결정
+        if self.right_castle.gold >= 100:  # 최소 비용
+            # 현재 전략에 따른 확률 분포 사용
+            weights = list(self.ai_strategy[self.ai_mode].values())
+            unit_types = list(self.ai_strategy[self.ai_mode].keys())
+            
+            # 상황에 따른 추가 조정
+            if self.right_castle.gold >= 200:  # 골드가 충분하면
+                choice = random.choices(unit_types, weights=weights)[0]
+                new_unit = self.right_castle.create_unit(choice)
+                if new_unit:
+                    self.units.append(new_unit)
+            elif self.right_castle.gold >= 150:  # 중간 정도의 골드
+                # 전사나 궁수만 생산
+                if random.random() < 0.7:  # 70% 확률로 생산
+                    choice = random.choice(["전사", "궁수"])
+                    new_unit = self.right_castle.create_unit(choice)
+                    if new_unit:
+                        self.units.append(new_unit)
+            else:  # 골드가 적을 때
+                # 전사만 생산
+                if random.random() < 0.5:  # 50% 확률로 생산
+                    new_unit = self.right_castle.create_unit("전사")
+                    if new_unit:
+                        self.units.append(new_unit)
 
 if __name__ == "__main__":
     game = Game()
